@@ -1,0 +1,157 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Video Chat App</title>
+</head>
+<body>
+    <h1>Video Chat App</h1>
+    <div id="localVideoContainer">
+        <video id="localVideo" autoplay muted></video>
+    </div>
+    <div id="remoteVideoContainer">
+        <video id="remoteVideo" autoplay></video>
+    </div>
+
+    <script src="/socket.io/socket.io.js"></script>
+    <script>
+        // Connect to the signaling server
+        const socket = io();
+
+         // Handle room creation and joining
+        const createRoomButton = document.getElementById('create-room-button');
+        const joinRoomButton = document.getElementById('join-room-button');
+        const roomInput = document.getElementById('room-input');
+
+
+        // Get access to the user's camera and microphone
+        navigator.mediaDevices.getUserMedia({ video: true, audio: true })
+            .then(stream => {
+                const localVideo = document.getElementById('localVideo');
+                localVideo.srcObject = stream;
+
+                // Create a new RTCPeerConnection
+                const peerConnection = new RTCPeerConnection();
+
+                // Add the user's stream to the peer connection
+                stream.getTracks().forEach(track => peerConnection.addTrack(track, stream));
+
+                // Send ice candidates to the other peer
+                peerConnection.onicecandidate = event => {
+                    if (event.candidate) {
+                        socket.emit('ice-candidate', event.candidate);
+                    }
+                };
+
+                // Handle ice candidates from the other peer
+                socket.on('ice-candidate', candidate => {
+                    peerConnection.addIceCandidate(new RTCIceCandidate(candidate));
+                });
+
+                // Handle the remote stream
+                peerConnection.ontrack = event => {
+                    const remoteVideo = document.getElementById('remoteVideo');
+                    remoteVideo.srcObject = event.streams[0];
+                };
+
+                // Create an offer to start the peer connection
+                peerConnection.createOffer()
+                    .then(offer => peerConnection.setLocalDescription(offer))
+                    .then(() => {
+                        socket.emit('offer', peerConnection.localDescription);
+                    });
+
+                // Handle the answer from the other peer
+                socket.on('answer', answer => {
+                    const remoteDescription = new RTCSessionDescription(answer);
+                    peerConnection.setRemoteDescription(remoteDescription);
+                });
+
+                createRoomButton.addEventListener('click', () => {
+                const roomName = roomInput.value;
+                    if (roomName.trim() !== '') {
+                        socket.emit('create-room', roomName);
+                    }
+                });
+
+                joinRoomButton.addEventListener('click', () => {
+                const roomName = roomInput.value;
+                    if (roomName.trim() !== '') {
+                        socket.emit('join-room', roomName);
+                    }
+                });
+
+                // Handle room not found
+                socket.on('room-not-found', () => {
+                    alert('Room not found. Please check the room name.');
+                });
+
+                // Handle participants list
+                socket.on('participants', (participants) => {
+                    console.log('Participants in the room:', participants);
+                    // Update your UI with the list of participants
+                });
+
+                 // Handle new participant in the room
+                socket.on('new-participant', (participantId) => {
+                    // Create a new peer connection
+                    const peerConnection = new RTCPeerConnection();
+
+                    // Add local stream to peer connection
+                    peerConnection.addStream(localStream);
+
+                    // Create an offer
+                    peerConnection.createOffer()
+                        .then(offer => peerConnection.setLocalDescription(offer))
+                        .then(() => {
+                            socket.emit('offer', peerConnection.localDescription, participantId);
+                        });
+
+                    // Handle ICE candidates
+                    peerConnection.onicecandidate = (event) => {
+                        if (event.candidate) {
+                            socket.emit('ice-candidate', event.candidate, participantId);
+                        }
+                    };
+
+                    // Handle answer from the remote participant
+                    socket.on('answer', (answer, remoteParticipantId) => {
+                        if (remoteParticipantId === participantId) {
+                            const remoteDescription = new RTCSessionDescription(answer);
+                            peerConnection.setRemoteDescription(remoteDescription);
+                        }
+                    });
+
+                    // Handle ICE candidates from the remote participant
+                    socket.on('ice-candidate', (candidate, remoteParticipantId) => {
+                        if (remoteParticipantId === participantId) {
+                            peerConnection.addIceCandidate(new RTCIceCandidate(candidate));
+                        }
+                    });
+
+                    // ... (Media handling and UI updates)
+
+                     // Handle receiving media stream from the remote participant
+                    socket.on('receive-stream', (stream, remoteParticipantId) => {
+                        if (remoteParticipantId === participantId) {
+                            const remoteVideo = document.createElement('video');
+                            remoteVideo.srcObject = stream;
+                            remoteVideo.autoplay = true;
+                            // Append the remote video element to the UI
+                            document.getElementById('remoteVideoContainer').appendChild(remoteVideo);
+                        }
+                    });
+        
+                });
+
+                // Start broadcasting local stream to other participants
+                const broadcastButton = document.getElementById('broadcast-button');
+                broadcastButton.addEventListener('click', () => {
+                    socket.emit('broadcast', localStream);
+                });
+            })
+            .catch(error => console.error('Error accessing media devices:', error));
+    </script>
+</body>
+</html>
